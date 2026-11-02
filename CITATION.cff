@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+type: software
+title: "Excising Prompt Injections from Web Pages Before a Browser Agent Reads Them"
+authors:
+  - family-names: Bayuud
+    given-names: Ochila
+    affiliation: The Ohio State University
+version: 0.1.0
+date-released: 2026-11-01
+license: MIT

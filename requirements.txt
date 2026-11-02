@@ -1,0 +1,21 @@
+# Versions of the environment the report's experiments ran in (Python 3.12)
+# Model and data
+torch==2.14.1
+transformers==5.20.2
+huggingface_hub==1.33.0
+safetensors==0.8.0
+pyarrow==26.0.0
+pandas==3.1.0
+numpy==2.5.4
+numba==0.68.0
+fast-diff-match-patch==2.1.0
+scikit-learn==1.9.1
+pyyaml==6.0.3
+# Agent experiment
+litellm==1.106.3
+pydantic==2.14.1
+python-dotenv==1.2.4
+statsmodels==0.15.0
+tqdm==4.70.1
+# Tests
+pytest==9.1.1

@@ -1,0 +1,39 @@
+# Data, model, training and decoding settings used in the report (Appendix A).
+# Read once by excise/config.py; command-line flags override the training values.
+
+dataset:
+  repo: perplexity-ai/browsesafe-plus-plus
+  revision: b8c50afc1a1904923c67657dfa1abf41f812ec71
+  shards: 21
+
+backbone:
+  repo: perplexity-ai/pplx-embed-v1-0.6b
+  revision: 2c4d510dd4a732063c31a0f70193e35067b51fd8
+  pad_id: 151643
+
+splits:
+  seed: 0
+  # Pairs per set. Pairs sharing an injection are kept in one set. The fourth set of 1,000 pairs
+  # was reserved for agent experiments; its last 900 pairs are the latency pages.
+  sizes: {latency_pool: 1000, test: 1000, dev: 800, train: 10000}
+  latency_skip: 100
+
+windows:
+  length: 4096
+  stride: 3840
+
+train:
+  epochs: 3
+  batch: 8
+  accum: 2               # effective batch 16 windows
+  lr: 5.0e-5             # backbone; the two heads use head_lr_scale times this
+  head_lr_scale: 10
+  warmup: 0.05
+  token_loss_weight: 1.5
+  window_loss_weight: 0.3
+  tag_weight_max: 20     # tag weights (f_c / f_O)^-1/2 clipped to [1, tag_weight_max]
+  seed: 0
+
+decode:
+  offset_grid: [-2, -1, 0, 1, 2]   # searched for each of the O, B and E offsets on the dev set
+  threshold_percentile: 99         # page threshold = this percentile of dev original-page scores

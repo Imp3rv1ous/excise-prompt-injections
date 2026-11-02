@@ -1,0 +1,22 @@
+# Outputs: results, weights, caches and data files are not in the repository
+results/
+weights/
+data/labels/
+data/cache/
+data/splits/agent_candidates.txt
+*.jsonl
+*.parquet
+*.pt
+*.safetensors
+
+# API keys never enter the repository
+.env
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
