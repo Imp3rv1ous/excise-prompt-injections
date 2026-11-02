@@ -4,7 +4,9 @@ A 0.6B encoder locates prompt injections in web pages and deletes them before a 
 Its training labels need no annotation: in BrowseSafe++ every attack page comes with its original page, and the
 difference between the two marks the injection.
 
-Paper: [report.pdf](paper/report.pdf)
+Paper: [excise-prompt-injections.pdf](paper/excise-prompt-injections.pdf) · Poster: [excise-prompt-injections-poster.pdf](paper/excise-prompt-injections-poster.pdf)
+
+[![Poster](paper/excise-prompt-injections-poster.png)](paper/excise-prompt-injections-poster.pdf)
 
 ## Report sections and code
 
