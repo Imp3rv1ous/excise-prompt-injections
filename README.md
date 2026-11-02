@@ -1,90 +1,124 @@
 # Excise, Don't Block
 
-A 0.6B encoder locates prompt injections in web pages and deletes them before a browsing agent reads the page.
-Its training labels need no annotation: in BrowseSafe++ every attack page comes with its original page, and the
-difference between the two marks the injection.
+A browser agent reads web pages as text, and a page author can plant an instruction that turns the agent against
+its user. The defenses in use change the page before the agent reads it, at a price: blocking a flagged page
+discards the content the task needs, and rewriting the page with a large language model adds a model call for
+every page. This repository trains a 0.6B encoder that locates the injected text and deletes it, leaving the rest
+of the page untouched. Its training labels need no annotation: in BrowseSafe++ every attack page comes with its
+original page, and the difference between the two marks the injection.
 
 Paper: [excise-prompt-injections.pdf](paper/excise-prompt-injections.pdf) · Poster: [excise-prompt-injections-poster.pdf](paper/excise-prompt-injections-poster.pdf)
 
 [![Poster](paper/excise-prompt-injections-poster.png)](paper/excise-prompt-injections-poster.pdf)
 
-## Report sections and code
+## How it works
 
-| Report section | Module | What it does |
+**Labels from page pairs.** The two pages of a pair are compared character by character, and every character the
+attack page has and the original page lacks belongs to the injection. Both pages of a pair stay in one data set,
+and so do pairs that share an injection text, so no injection leaks from training into testing.
+
+**Model and decoding.** A page is cut into overlapping windows of up to 4,096 tokens, and a bidirectional encoder
+reads each window once. A token head tags every token as the start, inside, end or whole of an injected span, or as
+outside any span, and a window head scores the window. The page score is the highest window score, and only pages
+above a threshold are excised. A constrained decoder picks the best tag sequence that forms valid spans, and those
+spans are deleted.
+
+**Testing with agents.** Five agents, four smaller open-weight models and GPT-6 Luna, carry out the user task on each
+page under four conditions: the attack page unchanged, the attack page after excision, a placeholder sentence in
+place of the blocked page, and the original page. A judge model reads the tool calls and the final answer of every
+run and decides whether the agent followed the injection and whether it completed the task.
+
+## Results
+
+- **Excision restores the original page** on 90.3% of Markdown and 83.9% of HTML test pages.
+- **Agents stop following the injection without losing the task.** After excision, each agent's attack success
+  rate falls back to about its level on the original page, and its task completion rate stays within 2 percentage
+  points of that level. Blocking leaves almost no task completed.
+- **The whole defense takes well under a second per page.** The time runs from the input page to the excised page,
+  median over pages.
+
+| GPU | HTML | Markdown |
 |---|---|---|
-| 3.1 Model: From Paired Pages to Labels | `excise/data/source.py`, `split.py`, `labels.py` | pinned dataset, character-diff labels, split by injection text (Table 3) |
-| 3.2 Model: Architecture and Training | `excise/data/windows.py`, `excise/model/model.py`, `train.py` | windows and BIOES token tags, backbone and two heads, loss, optimizer |
-| 3.3 Model: From Scores to an Excised Page | `excise/model/decode.py`, `tune.py`, `infer.py` | page score, constrained decoding, HTML alignment, dev-set thresholds and offsets; one page in, excised page out |
-| 3.4 Evaluation: Pages, Agents and Conditions | `excise/data/agent_set.py`, `excise/agent/` (`run.py`, `tools.py`, `prompts.py`, `judge.py`, `framework/`) | agent evaluation set, tool-calling agent, five simulated tools, four conditions, judge |
-| 3.5 Evaluation: Metrics | `excise/eval/char_metrics.py`, `restore.py`, `evaluate.py`, `excise/agent/summarize.py`, `excise/latency/summarize.py` | page and character metrics, exact-excision criterion, Wilson intervals, latency medians and p90 |
-| 4.1 RQ1 | `excise/eval/evaluate.py`, `excise/agent/prepare_pages.py` | Table 4 (test set), Table 5 (agent evaluation set), exact excision by placement (Figure 5) |
-| 4.2 RQ2 | `excise/agent/run.py`, `judge.py`, `summarize.py` | Tables 6 and 7: attack success and task completion per agent, condition and attack goal |
-| 4.3 RQ3 | `excise/latency/time_pages.py`, `summarize.py` | Table 8 and Figure 8: time per page from input page to excised page, split into model pass and span excision |
-| Appendix A | `configs/excise.yaml`, `excise/model/train.py`, `tune.py` | data and backbone revisions, windows, loss, optimizer, decoding search; training log (Figure 7) |
-| Appendix C | `excise/agent/prompts.py` | agent and judge prompts |
+| H200 | 147 ms | 39 ms |
+| RTX 4090 | 346 ms | 71 ms |
 
-`excise/agent/framework/` is a minimal tool-calling agent framework: tool abstraction, execution context, LiteLLM
-client and the agent loop. `excise/eval/failure_analysis.py` is a diagnostic that the report does not use.
+## Limitations and next step
 
-## Install
+Every injection in this study is a fixed piece of text, written before the defense existed, so the results say
+nothing about an attacker who rewrites the injection after seeing what the model removes. The agents ran in a
+simulated browser: each run handed the agent the text of one page, the e-mail and form tools only recorded the call,
+and a language model judged the outcome. The next step is an adversary who revises the injection against the
+deployed model, and with it a way to train the excision model efficiently as such attacks evolve.
 
-Python 3.10 or newer (the experiments ran on 3.12).
+## Repository layout
+
+```
+excise/data/      dataset at a pinned commit, diff labels, split by injection text, training windows, agent set
+excise/model/     encoder with two heads, training, decoding, threshold and offset tuning, single-page inference
+excise/eval/      exact-excision criterion, page and character metrics, test-set evaluation
+excise/agent/     tool-calling agent, five simulated tools, four conditions, judge, result tables with Wilson intervals
+excise/latency/   per-page timing of the model pass and the span excision
+configs/          data, model, training and decoding settings used in the paper
+data/splits/      the frozen train, dev, test, agent evaluation and latency sets, as entry ids
+scripts/          training, agent experiment and latency runs for a GPU machine
+tests/            unit tests of the HTML span alignment
+paper/            the paper and the poster
+```
+
+Each module docstring names the section of the paper it implements. `excise/agent/framework/` is a minimal
+tool-calling agent framework, and `excise/eval/failure_analysis.py` is a diagnostic the paper does not use.
+
+## Reproduce
+
+Python 3.10 or newer (the experiments ran on 3.12). BrowseSafe++ is gated on Hugging Face: accept its terms, then
+`hf auth login`. The dataset and the backbone download at their pinned revisions on first use.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-BrowseSafe++ is gated on Hugging Face: accept its terms, then `hf auth login`. The dataset (pinned commit) and the
-backbone (pinned revision) download on first use.
-
-## API keys
-
-Only the agent experiment calls APIs. Copy `.env.example` to `.env` at the repository root and fill in the keys;
-`excise/agent/run.py` and `judge.py` load the file with python-dotenv, and LiteLLM reads the variables
-(`OPENROUTER_API_KEY` for the four open-weight agents, `OPENAI_API_KEY` for GPT-6 Luna, `DEEPSEEK_API_KEY` for the
-judge). `.env` is in `.gitignore`.
-
-## Run order
-
-All commands run from the repository root. `scripts/` wraps steps 2-6 for a GPU machine.
+Only the agent experiment calls APIs. Copy `.env.example` to `.env` at the repository root and fill in
+`OPENROUTER_API_KEY` for the four open-weight agents, `OPENAI_API_KEY` for GPT-6 Luna and `DEEPSEEK_API_KEY` for the
+judge; `.env` is in `.gitignore`. All commands run from the repository root, every entry point takes `--help`, and
+`scripts/` wraps steps 2-6 for a GPU machine. Outputs go to `results/`, weights to `weights/`.
 
 1. **Data.** The frozen splits are in `data/splits/` (`train`, `dev`, `test`, `agent_eval`, `latency`; entry ids,
    attack page then original page). To rebuild `train`, `dev`, `test` and `latency`: `python -m excise.data.split`
 2. **Labels and windows.**
    `python -m excise.data.labels && python -m excise.data.windows`
-3. **Training.**
+3. **Training.** Writes `weights/run1/`; tuning adds `decode.json` with the page thresholds and tag offsets.
    `python -m excise.model.train --out weights/run1 && python -m excise.model.tune --weights weights/run1`
-4. **Localization test (Table 4, Figure 5).**
+4. **Localization test.** The paper's HTML numbers were decoded without the last HTML alignment rule of
+   `excise/model/decode.py` (83.9% exact excision); with the rule the same pages give 94.7%. The agent and latency
+   runs use the full rule set.
    `python -m excise.eval.evaluate --split test --without-close-tag-rule`
-5. **Agent experiment, four conditions (Tables 5-7, Figure 6).** On a GPU: `bash scripts/agent.sh pages`. Then, with
-   API keys (this spends money): `bash scripts/agent.sh run`, which runs `python -m excise.agent.run`,
-   `python -m excise.agent.judge` and `python -m excise.agent.summarize`. The report's runs were made one process per
-   agent (`--agents`), condition A with `--concurrency 10` and B, C and R with 20, and the run files were
-   concatenated before judging.
-6. **Latency (Table 8, Figure 8).** On an idle GPU: `bash scripts/latency.sh`. The RTX 4090 rows of Table 8 time 100
-   development-set attack pages per view:
+5. **Agent experiment.** The agent evaluation set is 1,005 pairs outside train / dev / test, 201 per attack goal
+   (`data/splits/agent_eval.txt`; `excise/data/agent_set.py` shows how it was drawn). On a GPU:
+   `bash scripts/agent.sh pages`. Then, with API keys (this spends money): `bash scripts/agent.sh run`, which runs
+   `python -m excise.agent.run`, `python -m excise.agent.judge` and `python -m excise.agent.summarize`. The paper's
+   runs were made one process per agent (`--agents`, `--concurrency 10` for the no-defense condition and 20
+   otherwise) and the run files concatenated before judging.
+6. **Latency.** Times the 900 attack pages of `data/splits/latency.txt`, drawn from pairs outside train / dev /
+   test. On an idle GPU: `bash scripts/latency.sh`. The RTX 4090 rows time 100 development-set attack pages per view:
    `python -m excise.latency.time_pages --split data/splits/dev.txt --pairs 100 --out results/latency_4090.jsonl`
 
-Every entry point takes `--help`. Outputs go to `results/`, weights to `weights/`.
+Weights, results, labels, cached windows and dataset files are not in the repository; the steps above regenerate
+them. The paper's tables and figures were formatted from `results/` and the training log; those scripts are not
+included.
 
-## Notes
+## Citation
 
-- **HTML decoding rule.** `excise/model/decode.py` ends its HTML alignment with a rule that keeps a closing tag at
-  the start of a span. The report's HTML numbers were decoded without it (`--without-close-tag-rule`, 83.9% exact
-  excision on the test set); with it the same pages give 94.7%. The agent and latency runs use the full rule set.
-- **Agent evaluation set.** 1,005 pairs outside train / dev / test, 201 per attack goal. `excise/data/agent_set.py`
-  documents how it was drawn; `data/splits/agent_eval.txt` is the frozen result.
-- **Latency pages.** The 900 attack pages of `data/splits/latency.txt` come from pairs outside train / dev / test,
-  drawn by the split before the agent evaluation set was chosen.
+See [CITATION.cff](CITATION.cff), or:
 
-## Not in this repository
-
-Trained weights, results, labels, cached windows and dataset files are not included (`.gitignore`); the steps above
-regenerate them. Training writes `weights/run1/` (`model.safetensors`, `config.json`, the tokenizer files and
-`train_log.jsonl`) and tuning adds `decode.json` (page thresholds and tag offsets). The tables and figures of the
-report were formatted from `results/*_metrics.json`, `results/agent_table.md`, `results/latency_table.md`,
-`results/latency.jsonl` and `weights/run1/train_log.jsonl`; the formatting scripts are not included.
+```bibtex
+@software{bayuud2026excise,
+  author = {Bayuud, Ochila},
+  title  = {Excising Prompt Injections from Web Pages Before a Browser Agent Reads Them},
+  year   = {2026},
+  url    = {https://github.com/Imp3rv1ous/excise-prompt-injections}
+}
+```
 
 ## License
 
